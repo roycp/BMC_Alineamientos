@@ -1,10 +1,39 @@
 #include <stdio.h>
 #include <string.h>
-int GAP_PENALTY = 2;
+#include <stdlib.h>
+#include "needleman_wunsch.h"
 
-void print_matrix(int c_size, int r_size, int matrix[255][255], char *secuence1, char *secuence2);
-int needleman_wunch_gap_penalty(int value, int penalty);
-void init_standard_needleman_wunsch(int c_size, int r_size, int matrix[255][255]);
+
+void print_simple_matrix (int c_size, int r_size, int matrix[255][255])
+{
+	int i, j;
+	printf ("\nMatrix\n");
+	for (i = 0; i < r_size; i++)
+	{
+		for (j = 0; j < c_size; j++)
+		{
+			printf("%d ", matrix[i][j]);
+		}
+		printf ("\n");
+	}
+}
+
+void print_char_matrix (int c_size, int r_size, char matrix[255][255])
+{
+	int i, j;
+	printf ("\nArrows Matrix\n");
+	printf ("1 Up, 2 Diagonal, 4 Left\n");
+	printf ("3 Up-Diagonal, 5 Up-Left, 6 Diagonal-Left\n");	
+	printf ("7 All directions\n");
+	for (i = 0; i < r_size; i++)
+	{
+		for (j = 0; j < c_size; j++)
+		{
+			printf("%d ", matrix[i][j]);
+		}
+		printf ("\n");
+	}
+}
 
 void init_matrix(int c_size, int r_size, int matrix[255][255]) {
   int i, j;
@@ -12,29 +41,26 @@ void init_matrix(int c_size, int r_size, int matrix[255][255]) {
   matrix[0][0] = 0;
   for (i = 1; i < r_size; i++) {
     for (j = 1; j < c_size; j++) {
-      if ( j == 0) {
-        matrix[i][j] = matrix[i-1][j] - 2;
-      }
-      if (i == 0) {
-        matrix[i][j] = matrix[i][j -1] - 2;
-      }
       if (i != 0 && j != 0) {
         matrix[i][j] = 0;
       }
     }
   }
 
-  init_standard_needleman_wunsch(c_size, r_size, matrix);
+	if (run_smith_waterman != 1)
+		init_standard_needleman_wunsch(c_size, r_size, matrix);
 }
 
 void init_standard_needleman_wunsch(int c_size, int r_size, int matrix[255][255]) {
   int i, j;
   for(i = 1; i < r_size; i++) {
     matrix[i][0] = needleman_wunch_gap_penalty(matrix[i - 1][0], GAP_PENALTY);
+	  arrows[i][0] = 0x01;
   }
 
   for(j = 1; j < c_size; j++) {
     matrix[0][j] = needleman_wunch_gap_penalty(matrix[0][j - 1], GAP_PENALTY);
+	  arrows[0][j] = 0x04;
   }
 }
 
@@ -160,25 +186,51 @@ void get_upper_secuence(int c_size, int r_size, int values[255][255], char *secu
   printf("%s", aligment_2);
 }
 
-int max(int a, int b) {
-  int max;
-  max = a > b ? a : b;
-  return max;
-}
-
 int process_match(char column_char_value, char row_char_value, int evaluation_value) {
   int match_value;
-  match_value = (column_char_value == row_char_value) ? 1 : -1;
+  match_value = (column_char_value == row_char_value) ? MATCH_SCORE : MISSMATCH_SCORE;
   return evaluation_value + match_value;
 }
 
-int process_cell_value(char column_secuence_char, char row_secuence_char, int diagonal_value, int upper_value, int left_value) {
+int process_cell_value(int i, int j, char column_secuence_char, char row_secuence_char, int diagonal_value, int upper_value, int left_value) {
   int match, gap, up_gap, left_gap;
   match = process_match(column_secuence_char, row_secuence_char, diagonal_value);
   up_gap = needleman_wunch_gap_penalty(upper_value, GAP_PENALTY);
   left_gap = needleman_wunch_gap_penalty(left_value, GAP_PENALTY);
   gap = max(up_gap, left_gap);
-  return max(match, gap);
+
+	if (run_smith_waterman)
+		gap = max_zero(match, gap);
+	else
+		gap = max(match, gap);
+
+	//this only works for NW
+	char direction = 0x00;
+	if (up_gap > match)	{
+		if (up_gap > left_gap)
+			direction = 0x01;
+		else if(up_gap < left_gap)
+			direction = 0x04;
+		else		
+			direction = 0x05;			
+	}
+	else if (up_gap < match) {
+		if (match > left_gap)
+			direction = 0x02;
+		else if(match < left_gap)
+			direction = 0x04;
+		else		
+			direction = 0x06;
+	}
+	else {
+		if (up_gap < left_gap)		
+			direction = 0x04;		
+		else
+			direction = 0x07;
+	}
+
+	arrows[i][j] = direction;
+	return gap;
 }
 
 void process_needleman_wunsch(int c_size, int r_size, int values[255][255], char *secuence1, char *secuence2) {
@@ -186,7 +238,7 @@ void process_needleman_wunsch(int c_size, int r_size, int values[255][255], char
 
   for(i = 1; i < r_size; i++) {
     for(j = 1; j < c_size; j++) {
-      values[i][j] = process_cell_value(secuence1[j - 1], secuence2[i - 1], values[i - 1][j - 1], values[i -1][j], values[i][j -1]);
+      values[i][j] = process_cell_value(i, j, secuence1[j - 1], secuence2[i - 1], values[i - 1][j - 1], values[i -1][j], values[i][j -1]);
     }
   }
 }
@@ -194,20 +246,83 @@ void process_needleman_wunsch(int c_size, int r_size, int values[255][255], char
 int *needleman_wunsch(int c_size, int r_size, int values[255][255], char *secuence1, char *secuence2) {
   init_matrix(c_size, r_size, values);
   process_needleman_wunsch(c_size, r_size, values, secuence1, secuence2);
-  get_upper_secuence(c_size, r_size, values, secuence1, secuence2);
+  //get_upper_secuence(c_size, r_size, values, secuence1, secuence2);
 }
 
-int main(int argc, char** argv) {
+void PrintCellAligment(int i, int j, char* secuence1, char* secuence2, int gap_up, int gap_left)
+{
+	if (gap_up == 1)
+		printf ("_  %c\n", secuence2[i]);
+	else if (gap_left == 1)
+		printf ("%c  _\n", secuence1[j]);
+	else
+		printf ("%c  %c\n",secuence1[j], secuence2[i]);			
+}
 
-  char secuence1[10] = "ATTGTGATCC";
-  char secuence2[10] = "TTGCATCGGC";
+void Aligment(int i, int j, char* secuence1, char* secuence2)
+{
+	printf ("Aligment \nup down \n");
+	
+	while(i != 0 || j != 0)
+	{
+		char direction = arrows[i][j];
+	
+		if (((direction >> 1) & 0x01) == 1) //check diagonal
+		{
+			PrintCellAligment (i-1, j-1, secuence1, secuence2, 0, 0);
+			i -= 1;
+			j -= 1;			
+		}
+		else if (((direction >> 0) & 0x01) == 1) //check up
+		{		
+			PrintCellAligment (i-1, j, secuence1, secuence2, 1, 0);
+			i -= 1;			
+		}
+		else if (((direction >> 2) & 0x01) == 1) //check left
+		{	
+			PrintCellAligment (i, j-1, secuence1, secuence2, 0, 1);
+			j -= 1;			
+		}
+		
+	}
+}
+
+// to run: ./needleman_wunsch 0 secuence1 (top) secuence2 (left)
+// 0 Needlaman-Wunsch, 1 Smith-Waterman
+int main(int argc, char** argv) {
+	
+	printf ("\nTo run: ./needleman_wunsch 0 secuence1 secuence2\n");
+	printf ("0 Needlaman-Wunsch, 1 Smith-Waterman\n");
+	printf ("On the matrix, secuence1: top sequence, secuence2: left sequence\n\n");
+	
+	if (argc > 1)
+	{		
+		int SW = atoi(argv[1]);
+		run_smith_waterman = SW;
+	}
+	else 
+		return 0;
+
+	for (int i = 0; i < 255; i++)
+	{
+		for (int j = 0; j < 255; j++)
+		{
+			arrows[i][j] = 0x00;
+		}
+	}
+/*	
+  char secuence1[11] = "ATTGTGATCC\0"; //j
+  char secuence2[11] = "TTGCATCGGC\0"; //i*/
   int values[255][255];
   int c_size, r_size;
-  c_size = (int) strlen(secuence1);
-  r_size = ((int) strlen(secuence2)) + 1;
+  c_size = (int) strlen(argv[2]) + 1;
+  r_size = ((int) strlen(argv[3])) + 1;
 
-  needleman_wunsch(c_size, r_size, values, secuence1, secuence2);
-  print_matrix(c_size, r_size, values, secuence1, secuence2);
+  needleman_wunsch(c_size, r_size, values, argv[2], argv[3]);	
+	print_simple_matrix (c_size, r_size, values);
+	print_char_matrix (c_size, r_size, arrows);
 
+  if (run_smith_waterman != 1)
+	  Aligment(r_size-1, c_size-1, argv[2], argv[3]);
   return(0);
 }
